@@ -107,11 +107,11 @@ for dataset_name in dataset_names:
         info.n_files = min(info.n_files, 2)
 
 # default objects, such as calibrator, selector, producer, ml model, inference model, etc
-cfg.x.default_calibrator = "example"
+cfg.x.default_calibrator = None
 cfg.x.default_selector = "example"
 cfg.x.default_producer = "example"
 cfg.x.default_ml_model = None
-cfg.x.default_inference_model = "example"
+cfg.x.default_inference_model = None
 cfg.x.default_categories = ("incl",)
 cfg.x.default_variables = ("n_jet", "jet1_pt")
 
@@ -213,6 +213,7 @@ cfg.x.keep_columns = DotDict.wrap({
         # object info
         "Jet.pt", "Jet.eta", "Jet.phi", "Jet.mass", "Jet.btagDeepFlavB", "Jet.hadronFlavour",
         "Muon.pt", "Muon.eta", "Muon.phi", "Muon.mass", "Muon.pfRelIso04_all",
+        "Muon.*", "L1Mu.*",
         "MET.pt", "MET.phi", "MET.significance", "MET.covXX", "MET.covXY", "MET.covYY",
         "PV.npvs",
         # columns added during selection
