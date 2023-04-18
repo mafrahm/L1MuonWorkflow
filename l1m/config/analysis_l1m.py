@@ -11,12 +11,14 @@ import law
 import order as od
 from scinum import Number
 
-from columnflow.util import DotDict
-from columnflow.columnar_util import EMPTY_FLOAT
+from columnflow.util import DotDict, maybe_import
+# from columnflow.columnar_util import EMPTY_FLOAT
 from columnflow.config_util import (
     get_root_processes_from_campaign, add_shift_aliases, get_shifts_from_sources, add_category,
 )
+from columnflow.tasks.external import GetDatasetLFNs
 
+ak = maybe_import("awkward")
 
 #
 # the main analysis object
@@ -80,6 +82,7 @@ process_names = [
     "data",
     "tt",
     "st",
+    "ggHH_kl_1_kt_1_sl_hbbhww",
 ]
 for process_name in process_names:
     # add the process
@@ -106,9 +109,33 @@ for dataset_name in dataset_names:
     for info in dataset.info.values():
         info.n_files = min(info.n_files, 2)
 
+cfg.add_dataset(
+    name="l1_tt",
+    id=1234567,
+    processes=[cfg.get_process("tt")],
+    info=dict(nominal=od.DatasetInfo(
+        keys=["tt"],
+        n_files=1,
+        n_events=1000,
+    )),
+    aux={"custom": True},
+)
+cfg.add_dataset(
+    name="l1_hh",
+    id=1234568,
+    processes=[cfg.get_process("ggHH_kl_1_kt_1_sl_hbbhww")],
+    info=dict(nominal=od.DatasetInfo(
+        keys=["ggHH"],
+        n_files=2,
+        n_events=1000,
+    )),
+    aux={"custom": True},
+)
+
+
 # default objects, such as calibrator, selector, producer, ml model, inference model, etc
 cfg.x.default_calibrator = None
-cfg.x.default_selector = "example"
+cfg.x.default_selector = "muon_reduction"
 cfg.x.default_producer = "example"
 cfg.x.default_ml_model = None
 cfg.x.default_inference_model = None
@@ -213,7 +240,7 @@ cfg.x.keep_columns = DotDict.wrap({
         # object info
         "Jet.pt", "Jet.eta", "Jet.phi", "Jet.mass", "Jet.btagDeepFlavB", "Jet.hadronFlavour",
         "Muon.pt", "Muon.eta", "Muon.phi", "Muon.mass", "Muon.pfRelIso04_all",
-        "Muon.*", "L1Mu.*",
+        # "Muon.*", "L1Mu.*",
         "MET.pt", "MET.phi", "MET.significance", "MET.covXX", "MET.covXY", "MET.covYY",
         "PV.npvs",
         # columns added during selection
@@ -253,12 +280,6 @@ add_category(
     selection="sel_incl",
     label="inclusive",
 )
-add_category(
-    cfg,
-    name="2j",
-    selection="sel_2j",
-    label="2 jets",
-)
 
 # add variables
 # (the "event", "run" and "lumi" variables are required for some cutflow plotting task,
@@ -285,25 +306,11 @@ cfg.add_variable(
     discrete_x=True,
 )
 cfg.add_variable(
-    name="n_jet",
-    expression="n_jet",
-    binning=(11, -0.5, 10.5),
-    x_title="Number of jets",
-)
-cfg.add_variable(
-    name="jet1_pt",
-    expression="Jet.pt[:,0]",
-    null_value=EMPTY_FLOAT,
-    binning=(40, 0.0, 400.0),
+    name="muons_pt",
+    expression=lambda events: ak.flatten(events.Muon.pt, axis=1),
+    binning=(40, 0, 400),
     unit="GeV",
-    x_title=r"Jet 1 $p_{T}$",
-)
-cfg.add_variable(
-    name="jet1_eta",
-    expression="Jet.eta[:,0]",
-    null_value=EMPTY_FLOAT,
-    binning=(30, -3.0, 3.0),
-    x_title=r"Jet 1 $\eta$",
+    x_title="$p_{T}$ of all muons",
 )
 # weights
 cfg.add_variable(
@@ -320,3 +327,37 @@ cfg.add_variable(
     unit="GeV",
     x_title=r"Jet 1 $p_{T}$",
 )
+
+
+def get_dataset_lfns(
+    dataset_inst: od.Dataset,
+    shift_inst: od.Shift,
+    dataset_key: str,
+) -> list[str]:
+    """
+    Custom method to obtain dataset files
+    """
+
+    if not dataset_inst.x("custom", None):
+        return GetDatasetLFNs.get_dataset_lfns_dasgoclient(
+            GetDatasetLFNs, dataset_inst=dataset_inst, shift_inst=shift_inst, dataset_key=dataset_key,
+        )
+    print("dataset name:", dataset_inst.name)
+    print("dataset_key:", dataset_key)
+
+    # this just needs to give me the directory after the "location" in the campaign definition
+    # so in my case just tt (the process)
+    lfn_base = law.wlcg.WLCGDirectoryTarget(
+        "/" + dataset_key + "/",
+        fs="wlcg_fs_eos_frahm",
+        # fs="wlcg_fs_run2_2017_nano_L1nano"
+    )
+
+    # loop though files and interpret paths as lfns
+    return [
+        lfn_base.child(basename, type="f").path
+        for basename in lfn_base.listdir(pattern="*.root")
+    ]
+
+
+cfg.x.get_dataset_lfns = get_dataset_lfns
