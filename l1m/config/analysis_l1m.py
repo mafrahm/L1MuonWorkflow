@@ -12,11 +12,13 @@ import order as od
 from scinum import Number
 
 from columnflow.util import DotDict, maybe_import
-# from columnflow.columnar_util import EMPTY_FLOAT
+from columnflow.columnar_util import EMPTY_FLOAT
 from columnflow.config_util import (
     get_root_processes_from_campaign, add_shift_aliases, get_shifts_from_sources, add_category,
 )
 from columnflow.tasks.external import GetDatasetLFNs
+
+from l1m.config.trigger import add_triggers
 
 ak = maybe_import("awkward")
 
@@ -72,7 +74,7 @@ campaign = campaign_run2_2017_nano_v9.copy()
 procs = get_root_processes_from_campaign(campaign)
 
 # create a config by passing the campaign, so id and name will be identical
-cfg = ana.add_config(campaign)
+config_2017 = cfg = ana.add_config(campaign)
 
 # gather campaign data
 year = campaign.x.year
@@ -80,6 +82,7 @@ year = campaign.x.year
 # add processes we are interested in
 process_names = [
     "data",
+    "data_mu",
     "tt",
     "st",
     "ggHH_kl_1_kt_1_sl_hbbhww",
@@ -94,12 +97,7 @@ for process_name in process_names:
 
 # add datasets we need to study
 dataset_names = [
-    # data
-    "data_mu_b",
-    # backgrounds
-    "tt_sl_powheg",
-    # signals
-    "st_tchannel_t_powheg",
+    # empty since we only add custom datasets at the moment
 ]
 for dataset_name in dataset_names:
     # add the dataset
@@ -131,12 +129,26 @@ cfg.add_dataset(
     )),
     aux={"custom": True},
 )
+cfg.add_dataset(
+    name="l1_data_mu",
+    id=1234569,
+    is_data=True,
+    processes=[cfg.get_process("data_mu")],
+    info=dict(nominal=od.DatasetInfo(
+        keys=["data_mu"],
+        n_files=1,
+        n_events=50000,
+    )),
+    aux={"custom": True},
+)
 
+# trigger meta info
+add_triggers(cfg)
 
 # default objects, such as calibrator, selector, producer, ml model, inference model, etc
 cfg.x.default_calibrator = None
 cfg.x.default_selector = "muon_reduction"
-cfg.x.default_producer = "example"
+cfg.x.default_producer = "default"
 cfg.x.default_ml_model = None
 cfg.x.default_inference_model = None
 cfg.x.default_categories = ("incl",)
@@ -238,14 +250,21 @@ cfg.x.keep_columns = DotDict.wrap({
         # general event info
         "run", "luminosityBlock", "event",
         # object info
-        "Jet.pt", "Jet.eta", "Jet.phi", "Jet.mass", "Jet.btagDeepFlavB", "Jet.hadronFlavour",
-        "Muon.pt", "Muon.eta", "Muon.phi", "Muon.mass", "Muon.pfRelIso04_all",
-        # "Muon.*", "L1Mu.*",
-        "MET.pt", "MET.phi", "MET.significance", "MET.covXX", "MET.covXY", "MET.covYY",
+        # "Muon.pt", "Muon.eta", "Muon.phi", "Muon.mass", "Muon.pfRelIso04_all",
+        # "L1Mu.pt", "L1Mu.eta", "L1Mu.phi", "L1Mu.mass", "L1Mu.hwQual", "L1Mu.bx",
+        # "TagMuon.*", "ProbeMuon.*", "L1TagMuon.*"
         "PV.npvs",
         # columns added during selection
-        "deterministic_seed", "process_id", "mc_weight", "cutflow.*",
-    },
+        "deterministic_seed", "process_id", "mc_weight",
+    } | set(
+        f"{l1mu}.{field}"
+        for l1mu in ("L1Mu", "L1TagMuon")
+        for field in ("pt", "eta", "phi", "mass", "hwQual", "bx")
+    ) | set(
+        f"{recomu}.{field}"
+        for recomu in ("Muon", "TagMuon", "ProbeMuon")
+        for field in ("pt", "eta", "phi", "mass")
+    ),
     "cf.MergeSelectionMasks": {
         "normalization_weight", "process_id", "category_ids", "cutflow.*",
     },
@@ -253,12 +272,13 @@ cfg.x.keep_columns = DotDict.wrap({
         "*",
     },
 })
+cfg.x.keep_columns["l1m.CustomReduceEvents"] = cfg.x.keep_columns["cf.ReduceEvents"]
 
 # event weight columns as keys in an OrderedDict, mapped to shift instances they depend on
 get_shifts = functools.partial(get_shifts_from_sources, cfg)
 cfg.x.event_weights = DotDict({
     "normalization_weight": [],
-    "muon_weight": get_shifts("mu"),
+    # "muon_weight": get_shifts("mu"),
 })
 
 # versions per task family and optionally also dataset and shift
@@ -277,6 +297,7 @@ cfg.add_channel(name="mutau", id=1)
 add_category(
     cfg,
     name="incl",
+    id=1,
     selection="sel_incl",
     label="inclusive",
 )
@@ -306,8 +327,16 @@ cfg.add_variable(
     discrete_x=True,
 )
 cfg.add_variable(
+    name="muon1_pt",
+    expression="Muon.pt[:, 0]",
+    null_value=EMPTY_FLOAT,
+    binning=(40, 0, 200),
+    unit="GeV",
+    x_title="Muon 1 $p_{T}$",
+)
+cfg.add_variable(
     name="muons_pt",
-    expression=lambda events: ak.flatten(events.Muon.pt, axis=1),
+    expression="Muon.pt",
     binning=(40, 0, 400),
     unit="GeV",
     x_title="$p_{T}$ of all muons",
@@ -318,14 +347,6 @@ cfg.add_variable(
     expression="mc_weight",
     binning=(200, -10, 10),
     x_title="MC weight",
-)
-# cutflow variables
-cfg.add_variable(
-    name="cf_jet1_pt",
-    expression="cutflow.jet1_pt",
-    binning=(40, 0.0, 400.0),
-    unit="GeV",
-    x_title=r"Jet 1 $p_{T}$",
 )
 
 
@@ -347,10 +368,16 @@ def get_dataset_lfns(
 
     # this just needs to give me the directory after the "location" in the campaign definition
     # so in my case just tt (the process)
+    """
     lfn_base = law.wlcg.WLCGDirectoryTarget(
         "/" + dataset_key + "/",
-        fs="wlcg_fs_eos_frahm",
-        # fs="wlcg_fs_run2_2017_nano_L1nano"
+        # fs="wlcg_fs_eos_frahm",
+        # fs="wlcg_fs_run2_2017_nano_L1nano",
+    )
+    """
+    lfn_base = law.LocalDirectoryTarget(
+        f"/nfs/dust/cms/user/frahmmat/data/L1nano/{dataset_key}/",
+        fs="local_nanos",
     )
 
     # loop though files and interpret paths as lfns
