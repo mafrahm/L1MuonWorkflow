@@ -35,5 +35,27 @@ def patch_bundle_repo_exclude_files():
 
 
 @memoize
+def patch_reduce_events():
+    """
+    In this L1 analysis, we want to implement a reduced workflow that directly applies
+    a selection instead of splitting into SelectEvents and ReduceEvents.
+    The ReduceEvents is therefore changed as to accept a "Selector", which directly
+    reduces the events as part. The `SelectEvents` task is therefore not needed anymore
+    """
+
+    print("Patching ReduceEvents...")
+
+    from l1m.tasks.reduction import CustomReduceEvents
+    from columnflow.tasks.reduction import MergeReductionStats, MergeReducedEvents
+
+    MergeReductionStats.reqs.ReduceEvents = CustomReduceEvents
+    MergeReducedEvents.reqs.ReduceEvents = CustomReduceEvents
+
+    from columnflow.tasks.selection import MergeSelectionStats
+    MergeSelectionStats.reqs.SelectEvents = CustomReduceEvents
+
+
+@memoize
 def patch_all():
     patch_bundle_repo_exclude_files()
+    patch_reduce_events()
