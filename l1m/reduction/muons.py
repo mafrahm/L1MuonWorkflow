@@ -60,7 +60,7 @@ def cutflow_routine(self, events, stats, step, **kwargs):
     },
     produces={
         mc_weight, process_ids, deterministic_seeds,
-        "TagMuon.*", "ProbeMuon.*", "L1TagMuon.*",
+        "ProbeMuon.*", "N_probes",
     },
     exposed=True,
 )
@@ -75,11 +75,11 @@ def muon_reduction(
 
     results = SelectionResult()
 
-    # create process ids
+    # create process ids (used for normalization)
     events = self[process_ids](events, **kwargs)
 
-    # deterministic seeds
-    events = self[deterministic_seeds](events, **kwargs)
+    # deterministic seeds (needed?)
+    # events = self[deterministic_seeds](events, **kwargs)
 
     # coffea behavior for L1 objects
     events = self[attach_coffea_behavior_l1](events, **kwargs)
@@ -141,40 +141,58 @@ def muon_reduction(
     )
     events = set_ak_column(events, "ProbeMuon", events.Muon[probe_reqs])
 
-    # Require minimum dR between ProbeMuon and TagMuon
-    # NOTE: is this cut only implemented to ensure that L1Tag and L1Probe are different objects?
-    tag_probe_mask = ak.any(events.ProbeMuon.metric_table(events.ProbeMuon) > 2 * self.max_dr, axis=2)
-    events = set_ak_column(events, "ProbeMuon", events.ProbeMuon[tag_probe_mask])
-    events = events[ak.num(events.ProbeMuon, axis=1) >= 1]
-    self[cutflow_routine](events, stats, "probe_dr")
+    # broadcast arrays to calculate invariant mass and delta R
+    probe, tag = ak.unzip(ak.cartesian([events.ProbeMuon, events.TagMuon], nested=True))
+    tag = set_ak_column(tag, "dr", probe.delta_r(tag))
+    tag = set_ak_column(tag, "m_inv", (tag + probe).mass)
 
+    match_reqs = tag.dr > 2 * self.max_dr
     if self.req_z:
-        # broadcast arrays to calculate invariant mass
-        probe, tag = ak.unzip(ak.cartesian([events.ProbeMuon, events.TagMuon], nested=True))
-        m_inv = (tag + probe).mass
-        matched_tags = (m_inv > 81) & (m_inv < 101)
+        match_reqs = match_reqs & (tag.m_inv > 81) & (tag.m_inv < 101)
 
-        # probes with at least one m_inv match are kept
-        probe_mask = ak.sum(matched_tags, axis=2) >= 1
-        events = set_ak_column(events, "ProbeMuon", events.ProbeMuon[probe_mask])
+    # store matched Tags as part of the ProbeMuons
+    events["ProbeMuon", "TagMuon"] = tag[match_reqs]
 
-        # require at least one probe with m_inv match
-        events = events[ak.num(events.ProbeMuon, axis=1) >= 1]
-        self[cutflow_routine](events, stats, "Zmass")
+    # probes with at least one match are kept
+    events = set_ak_column(
+        events, "ProbeMuon",
+        events.ProbeMuon[ak.num(events.ProbeMuon.TagMuon, axis=2) >= 1],
+    )
+
+    # require at least one probe with m_inv match
+    events = events[ak.num(events.ProbeMuon, axis=1) >= 1]
+    self[cutflow_routine](events, stats, "probe_match")
 
     self[cutflow_routine](events, stats, "selected")
 
-    # sums per process id
+    # TODO: match L1Mu to Probe (without cutting), flatten ProbeMuons (+ required columns broadcasted)
+    # and return flattened muons instead of events
+
+    # match L1Mu to Probe
+    probe, l1mu = ak.unzip(ak.cartesian([events.ProbeMuon, events.L1Mu], nested=True))
+    l1mu = set_ak_column(l1mu, "dr", probe.delta_r(l1mu))
+    events["ProbeMuon", "L1ProbeMuon"] = l1mu[l1mu.dr < self.max_dr]
+
+    # sums per process id (for normalization weights)
     if self.dataset_inst.is_mc:
         stats.setdefault("sum_mc_weight_per_process", defaultdict(float))
         unique_process_ids = np.unique(events.process_id)
-
         for p in unique_process_ids:
             stats["sum_mc_weight_per_process"][int(p)] += ak.sum(
                 events.mc_weight[events.process_id == p],
             )
 
-    return events, results
+    # store the number of probe muons (NOTE: changes if we define cuts on probes later)
+    events = set_ak_column(events, "N_probes", ak.num(events.ProbeMuon, axis=1))
+
+    # flatten ProbeMuon collection + some (broadcasted) other columns
+    keep_columns = {"process_id", "event", "ProbeMuon", "N_probes"}
+    if self.dataset_inst.is_mc:
+        keep_columns.add("mc_weight")
+
+    arrays = ak.flatten(ak.cartesian({field: events[field] for field in keep_columns}))
+
+    return arrays, results
 
 
 @muon_reduction.init
