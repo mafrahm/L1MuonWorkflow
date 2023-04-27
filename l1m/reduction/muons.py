@@ -39,7 +39,9 @@ def attach_coffea_behavior_l1(self: Selector, events: ak.Array, **kwargs) -> ak.
     return events
 
 
-@selector
+@selector(
+    uses={"mc_weight"},
+)
 def cutflow_routine(self, events, stats, step, **kwargs):
     print(f"Number of events after step {step}: {len(events)}")
     stats[f"n_events_{step}"] += len(events)
@@ -53,12 +55,12 @@ def cutflow_routine(self, events, stats, step, **kwargs):
         cutflow_routine, attach_coffea_behavior_l1,
         mc_weight, process_ids, deterministic_seeds,
         "nMuon", "Muon.pt", "Muon.eta", "Muon.phi", "Muon.mass",
-        "Muon.tightId", "Muon.mediumId",
+        "Muon.tightId", "Muon.mediumId", "Muon.charge",
         "L1Mu.pt", "L1Mu.eta", "L1Mu.phi", "L1Mu.mass", "L1Mu.bx", "L1Mu.hwQual",
     },
     produces={
         mc_weight, process_ids, deterministic_seeds,
-        "TagMuon", "ProbeMuon", "L1TagMuon",
+        "TagMuon.*", "ProbeMuon.*", "L1TagMuon.*",
     },
     exposed=True,
 )
@@ -131,11 +133,11 @@ def muon_reduction(
     self[cutflow_routine](events, stats, "l1tag_match")
 
     # to simplify for now: only leading TagMuon
-    events = set_ak_column(events, "TagMuon", ak.from_regular(events.TagMuon[:, [0]]))
+    # events = set_ak_column(events, "TagMuon", ak.from_regular(events.TagMuon[:, [0]]))
 
     # Baseline ProbeMuon requirements
     probe_reqs = (
-        (events.Muon.pt > self.prb_pt)
+        (events.Muon.pt > self.prb_pt)  # can I move this requirement to the producer?
     )
     events = set_ak_column(events, "ProbeMuon", events.Muon[probe_reqs])
 
@@ -147,7 +149,17 @@ def muon_reduction(
     self[cutflow_routine](events, stats, "probe_dr")
 
     if self.req_z:
-        # TODO: Z Mass window
+        # broadcast arrays to calculate invariant mass
+        probe, tag = ak.unzip(ak.cartesian([events.ProbeMuon, events.TagMuon], nested=True))
+        m_inv = (tag + probe).mass
+        matched_tags = (m_inv > 81) & (m_inv < 101)
+
+        # probes with at least one m_inv match are kept
+        probe_mask = ak.sum(matched_tags, axis=2) >= 1
+        events = set_ak_column(events, "ProbeMuon", events.ProbeMuon[probe_mask])
+
+        # require at least one probe with m_inv match
+        events = events[ak.num(events.ProbeMuon, axis=1) >= 1]
         self[cutflow_routine](events, stats, "Zmass")
 
     self[cutflow_routine](events, stats, "selected")
