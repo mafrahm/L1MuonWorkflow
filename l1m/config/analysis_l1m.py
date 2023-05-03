@@ -12,13 +12,13 @@ import order as od
 from scinum import Number
 
 from columnflow.util import DotDict, maybe_import
-from columnflow.columnar_util import EMPTY_FLOAT
 from columnflow.config_util import (
     get_root_processes_from_campaign, add_shift_aliases, get_shifts_from_sources, add_category,
 )
 from columnflow.tasks.external import GetDatasetLFNs
 
-from l1m.config.trigger import add_triggers
+from l1m.config.trigger import add_trigger_categories
+from l1m.config.variables import add_probe_variables
 
 ak = maybe_import("awkward")
 
@@ -142,9 +142,6 @@ cfg.add_dataset(
     aux={"custom": True},
 )
 
-# trigger meta info
-add_triggers(cfg)
-
 # default objects, such as calibrator, selector, producer, ml model, inference model, etc
 cfg.x.default_calibrator = None
 cfg.x.default_selector = "muon_reduction"
@@ -256,6 +253,7 @@ cfg.x.keep_columns = DotDict.wrap({
         "PV.npvs",
         # columns added during selection
         "deterministic_seed", "process_id", "mc_weight",
+        "N_probes",
     } | set(
         f"{l1mu}.{field}"
         for l1mu in ("L1Mu", "L1TagMuon")
@@ -265,9 +263,6 @@ cfg.x.keep_columns = DotDict.wrap({
         for recomu in ("Muon", "TagMuon", "ProbeMuon")
         for field in ("pt", "eta", "phi", "mass")
     ),
-    "cf.MergeSelectionMasks": {
-        "normalization_weight", "process_id", "category_ids", "cutflow.*",
-    },
     "cf.UniteColumns": {
         "*",
     },
@@ -301,10 +296,12 @@ add_category(
     selection="sel_incl",
     label="inclusive",
 )
+# trigger categories used for efficiency measurements
+add_trigger_categories(cfg)
 
-# add variables
-# (the "event", "run" and "lumi" variables are required for some cutflow plotting task,
-# and also correspond to the minimal set of columns that coffea's nano scheme requires)
+# add variables for histogramming/plotting
+add_probe_variables(cfg)
+
 cfg.add_variable(
     name="event",
     expression="event",
@@ -325,21 +322,6 @@ cfg.add_variable(
     binning=(1, 0.0, 5000.0),
     x_title="Luminosity block",
     discrete_x=True,
-)
-cfg.add_variable(
-    name="muon1_pt",
-    expression="Muon.pt[:, 0]",
-    null_value=EMPTY_FLOAT,
-    binning=(40, 0, 200),
-    unit="GeV",
-    x_title="Muon 1 $p_{T}$",
-)
-cfg.add_variable(
-    name="muons_pt",
-    expression="Muon.pt",
-    binning=(40, 0, 400),
-    unit="GeV",
-    x_title="$p_{T}$ of all muons",
 )
 # weights
 cfg.add_variable(
