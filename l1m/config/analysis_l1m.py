@@ -64,17 +64,18 @@ ana.x.config_groups = {}
 # ttbar and single top MCs, plus single muon data
 # update this config or add additional ones to accomodate the needs of your analysis
 
-from cmsdb.campaigns.run2_2017_nano_v9 import campaign_run2_2017_nano_v9
+# from cmsdb.campaigns.run2_2017_nano_v9 import campaign_run2_2017_nano_v9
+from l1m.config.datasets.run3_2023_nano_v11p9_v1 import campaign_run3_2023_nano_v11p9_v1
 
 # copy the campaign
 # (creates copies of all linked datasets, processes, etc. to allow for encapsulated customization)
-campaign = campaign_run2_2017_nano_v9.copy()
+campaign = campaign_run3_2023_nano_v11p9_v1.copy()
 
 # get all root processes
 procs = get_root_processes_from_campaign(campaign)
 
 # create a config by passing the campaign, so id and name will be identical
-config_2017 = cfg = ana.add_config(campaign)
+config = cfg = ana.add_config(campaign)
 
 # gather campaign data
 year = campaign.x.year
@@ -83,9 +84,6 @@ year = campaign.x.year
 process_names = [
     "data",
     "data_mu",
-    "tt",
-    "st",
-    "ggHH_kl_1_kt_1_sl_hbbhww",
 ]
 for process_name in process_names:
     # add the process
@@ -97,38 +95,21 @@ for process_name in process_names:
 
 # add datasets we need to study
 dataset_names = [
+    "prompt_data_mu0",
+    "prompt_data_mu1",
     # empty since we only add custom datasets at the moment
 ]
 for dataset_name in dataset_names:
     # add the dataset
     dataset = cfg.add_dataset(campaign.get_dataset(dataset_name))
 
-    # for testing purposes, limit the number of files to 2
+    # limit the number of files per dataset (for quick tests)
+    limit_dataset_files = 999
     for info in dataset.info.values():
-        info.n_files = min(info.n_files, 2)
+        info.n_files = min(info.n_files, limit_dataset_files)
 
-cfg.add_dataset(
-    name="l1_tt",
-    id=1234567,
-    processes=[cfg.get_process("tt")],
-    info=dict(nominal=od.DatasetInfo(
-        keys=["tt"],
-        n_files=1,
-        n_events=1000,
-    )),
-    aux={"custom": True},
-)
-cfg.add_dataset(
-    name="l1_hh",
-    id=1234568,
-    processes=[cfg.get_process("ggHH_kl_1_kt_1_sl_hbbhww")],
-    info=dict(nominal=od.DatasetInfo(
-        keys=["ggHH"],
-        n_files=2,
-        n_events=1000,
-    )),
-    aux={"custom": True},
-)
+# custom datasets (TODO: move in a separate file)
+# add_custom_datasets(config)
 cfg.add_dataset(
     name="l1_data_mu",
     id=1234569,
