@@ -116,7 +116,7 @@ def plot_eff(
 
     # labels and legend
     mplhep.cms.label(ax=ax, **cms_label_kwargs)
-    ax.legend(loc="best", title="Categories", fontsize=20, title_fontsize=24)
+    ax.legend(loc="best", title="Trigger", fontsize=20, title_fontsize=24)
 
     plt.tight_layout()
 

@@ -73,7 +73,8 @@ def add_trigger_categories(config: od.Config) -> None:
             name=f"trig_{trigger.name}",
             id=200 + trigger.id,
             selection=f"{trigger.name}_sel",
-            label=f"{trigger.name} passed (pt > {trigger.pt}, qual >= {trigger.qual[0]})",
+            label=r"%s ($p_{T} > %.1f$, $qual \geq %i$)" % (trigger.name, trigger.pt, trigger.qual[0]),
+            # label=f"{trigger.name} ($p_{T} > {trigger.pt}$, $qual >= {trigger.qual[0]}$)",
         )
 
 
